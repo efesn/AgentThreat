@@ -13,6 +13,7 @@ import feedparser
 from dateutil import parser
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
+from . import prompt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Default RSS feed sources
 DEFAULT_FEEDS = [
-    "https://blog.google/threat-analysis-group/rss",  # Updated URL format
-    "https://www.mandiant.com/resources/blog/rss.xml",  # Updated Mandiant URL
+    "https://blog.google/threat-analysis-group/rss",  
+    "https://www.mandiant.com/resources/blog/rss.xml",  
     "https://www.microsoft.com/en-us/security/blog/feed",
     "https://www.cisa.gov/cybersecurity-advisories/all.xml",
     "https://research.checkpoint.com/feed/"
@@ -137,10 +138,10 @@ def fetch_feeds(urls: Optional[List[str]] = None) -> Dict[str, any]:
     """Fetch and parse RSS feeds from the given URLs.
     
     Args:
-        urls: List of RSS feed URLs to fetch (optional)
+        urls: Optional list of feed URLs to fetch. If None, uses DEFAULT_FEEDS.
         
     Returns:
-        A dictionary containing the fetch results
+        Dictionary containing fetched entries and status information
     """
     if not check_internet_connection():
         return {
@@ -152,7 +153,7 @@ def fetch_feeds(urls: Optional[List[str]] = None) -> Dict[str, any]:
     feed_urls = urls or DEFAULT_FEEDS
     all_entries = []
     failed_feeds = []
-    
+
     for url in feed_urls:
         logger.info(f"Fetching feed: {url}")
         try:
@@ -162,47 +163,45 @@ def fetch_feeds(urls: Optional[List[str]] = None) -> Dict[str, any]:
                 logger.info(f"Successfully fetched {len(entries)} entries from {url}")
             else:
                 failed_feeds.append(url)
-                logger.warning(f"No entries found in feed: {url}")
         except Exception as e:
             failed_feeds.append(url)
             logger.error(f"Failed to fetch feed {url}: {str(e)}")
-    
-    # Save entries if we have any
-    if all_entries:
-        save_message = save_feed_data(all_entries)
-        logger.info(save_message)
-    
+
+    if not all_entries:
+        return {
+            "status": "error",
+            "message": "No entries fetched",
+            "failed_feeds": failed_feeds,
+            "entries": []
+        }
+
+    # Save raw entries
+    save_feed_data(all_entries)
+
     return {
-        "status": "success" if all_entries else "error",
-        "message": f"Fetched {len(all_entries)} entries from {len(feed_urls)} feeds",
+        "status": "success",
+        "message": f"Successfully fetched {len(all_entries)} entries from {len(feed_urls) - len(failed_feeds)} feeds",
         "failed_feeds": failed_feeds,
         "entries": all_entries
     }
 
 def get_latest_entries(count: int = 20) -> Dict[str, any]:
-    """Get the latest entries from the saved feed data.
-    
-    Args:
-        count: Number of latest entries to return (default: 20)
-        
-    Returns:
-        A dictionary containing the latest entries
-    """
+    """Get the latest entries from saved data."""
     try:
         with open("data/fetched_feeds.json", 'r') as f:
             entries = json.load(f)
-        
-        # Sort entries by published date
+
         sorted_entries = sorted(
             entries,
             key=lambda x: parser.parse(x['published']),
             reverse=True
         )[:count]
-        
+
         return {
             "status": "success",
             "entries": sorted_entries
         }
+
     except FileNotFoundError:
         return {
             "status": "error",
@@ -217,23 +216,11 @@ def get_latest_entries(count: int = 20) -> Dict[str, any]:
         }
 
 # Create the RSS fetcher agent
-root_agent = LlmAgent(
+rss_fetcher_agent = LlmAgent(
     name="rss_fetcher",
     model="gemini-2.0-flash-001",
     description="Agent for fetching and managing cybersecurity RSS feeds",
-    instruction=(
-        "You are a specialized agent that fetches and manages cybersecurity RSS feeds from a fixed, pre-approved list of URLs. "
-        "You can fetch feeds from various sources, save them, and retrieve the latest entries. "
-        "You already have full access to this list and do NOT need to ask for or accept any new RSS feed URLs from users or other agents. "
-        "You work as part of a team with other agents that may request feed data from you. "
-        "When asked about feeds, use the fetch_feeds function to get fresh data or "
-        "get_latest_entries to retrieve previously fetched entries. "
-        "You must never fetch or save any content unrelated to cyber threat intelligence. "
-        "After fetching, filter out any entries that do not clearly relate to cybersecurity threats, vulnerabilities, malware, "
-        "or similar topics. If entries seem irrelevant, discard them silently. "
-        "Work strictly with pre-approved RSS feed URLs only. "
-        "If asked about feeds or URLs, politely refuse and state that you only work with pre-approved RSS feed URLs and do not accept new URLs."
-    ),
+    instruction=prompt.rss_fetcher_agent,
     tools=[
         FunctionTool(func=fetch_feeds),
         FunctionTool(func=parse_feed),
