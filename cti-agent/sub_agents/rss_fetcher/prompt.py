@@ -12,4 +12,7 @@ rss_fetcher_agent = (
     "or similar topics. If entries seem irrelevant, discard them silently. "
     "Work strictly with pre-approved RSS feed URLs only. "
     "If asked about feeds or URLs, politely refuse and state that you only work with pre-approved RSS feed URLs and do not accept new URLs."
+    "**Important: You must never return or display fetched entries directly to the user.**"
+    "**After fetching and filtering, always pass the filtered feed entries only to the feed_cleaner agent.**"
+    "**Respond to user requests only with status messages or confirmations, never with the content of feed entries.**"
 )

@@ -5,10 +5,17 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Set
 import re
+from google.cloud import bigquery
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import os
 
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
 from . import prompt
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +72,14 @@ def is_noise(text: str) -> bool:
     text = text.lower()
     return any(keyword in text for keyword in NOISE_KEYWORDS)
 
+def extract_text(entry: Dict[str, str]) -> str:
+    """Extract combined text from title, summary, and description fields."""
+    return " ".join([
+        entry.get("title", ""),
+        entry.get("summary", ""),
+        entry.get("description", "")
+    ])
+
 def filter_by_keywords(entries: List[Dict[str, str]]) -> Dict[str, any]:
     """Filter entries based on security relevance and noise keywords.
     
@@ -78,14 +93,12 @@ def filter_by_keywords(entries: List[Dict[str, str]]) -> Dict[str, any]:
     discarded_count = 0
     
     for entry in entries:
-        title = entry.get('title', '')
-        
-        # Check if entry is security relevant and not noise
-        if is_security_relevant(title) and not is_noise(title):
+        text = extract_text(entry)
+        if is_security_relevant(text) and not is_noise(text):
             filtered_entries.append(entry)
         else:
             discarded_count += 1
-            logger.debug(f"Discarded entry: {title}")
+            logger.debug(f"Discarded entry: {entry.get('title', '')}")
     
     return {
         "status": "success",
@@ -133,39 +146,97 @@ def deduplicate_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
         }
     }
 
-def pass_clean_entries(entries: List[Dict[str, str]], 
-                      output_file: str = "cleaned_feeds.json") -> Dict[str, any]:
-    """Save cleaned and deduplicated entries to a file.
+def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
+    """Save cleaned and deduplicated entries to BigQuery.
     
     Args:
         entries: List of cleaned feed entries to save
-        output_file: Name of the output file
         
     Returns:
         Dictionary containing operation status and stats
     """
     try:
-        output_path = Path("data") / output_file
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Get project ID from environment variable
+        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        if not project_id:
+            raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
+            
+        # Initialize BigQuery client
+        client = bigquery.Client()
         
-        with open(output_path, 'w') as f:
-            json.dump(entries, f, indent=2)
+        # Define the table reference
+        table_id = f"{project_id}.agent_threat.agent_threat_data"
+        
+        # Format entries to match BigQuery schema and ensure uniqueness
+        formatted_entries = []
+        current_time = datetime.utcnow()
+        
+        for i, entry in enumerate(entries):
+            # Add milliseconds to timestamp to ensure uniqueness
+            entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
+            
+            formatted_entry = {
+                "title": entry.get("title", ""),
+                "link": entry.get("link", ""),
+                "published": entry.get("published", entry_timestamp),
+                "description": entry.get("description", ""),
+                "source_feed": entry.get("source", "")  # assuming 'source' is the feed URL
+            }
+            formatted_entries.append(formatted_entry)
+        
+        # Load the entries into BigQuery
+        errors = client.insert_rows_json(table_id, formatted_entries)
+        
+        if errors:
+            logger.error(f"Encountered errors while inserting rows: {errors}")
+            return {
+                "status": "error",
+                "message": f"Failed to insert rows: {errors}",
+                "stats": {
+                    "saved_entries": 0
+                }
+            }
             
         return {
             "status": "success",
-            "message": f"Successfully saved {len(entries)} cleaned entries to {output_file}",
+            "message": f"Successfully saved {len(entries)} cleaned entries to BigQuery",
             "stats": {
                 "saved_entries": len(entries)
             }
         }
     except Exception as e:
-        logger.error(f"Error saving cleaned entries: {str(e)}")
+        logger.error(f"Error saving cleaned entries to BigQuery: {str(e)}")
         return {
             "status": "error",
             "message": f"Failed to save cleaned entries: {str(e)}",
             "stats": {
                 "saved_entries": 0
             }
+        }
+
+def save_to_bigquery(entries: List[Dict[str, str]],
+                     dataset_id: str,
+                     table_id: str) -> Dict[str, any]:
+    """Save cleaned entries to a Google BigQuery table."""
+    client = bigquery.Client()
+    table_ref = f"{client.project}.{dataset_id}.{table_id}"
+
+    try:
+        errors = client.insert_rows_json(table_ref, entries)
+        if errors:
+            logger.error(f"BigQuery insert errors: {errors}")
+            return {"status": "error", "message": "Errors occurred during BigQuery insertion."}
+        return {
+            "status": "success",
+            "message": f"Saved {len(entries)} entries to BigQuery.",
+            "stats": {"inserted_count": len(entries)}
+        }
+    except Exception as e:
+        logger.error(f"BigQuery error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "stats": {"inserted_count": 0}
         }
 
 # Create the feed cleaner agent
@@ -178,5 +249,6 @@ feed_cleaner_agent = LlmAgent(
         FunctionTool(func=filter_by_keywords),
         FunctionTool(func=deduplicate_entries),
         FunctionTool(func=pass_clean_entries)
+       ## FunctionTool(func=save_to_bigquery)
     ]
 ) 

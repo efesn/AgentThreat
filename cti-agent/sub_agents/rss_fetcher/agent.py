@@ -21,11 +21,16 @@ logger = logging.getLogger(__name__)
 
 # Default RSS feed sources
 DEFAULT_FEEDS = [
-    "https://blog.google/threat-analysis-group/rss",  
-    "https://www.mandiant.com/resources/blog/rss.xml",  
-    "https://www.microsoft.com/en-us/security/blog/feed",
-    "https://www.cisa.gov/cybersecurity-advisories/all.xml",
-    "https://research.checkpoint.com/feed/"
+    "https://blog.google/threat-analysis-group/rss/",
+    "https://cloudblog.withgoogle.com/topics/threat-intelligence/rss/",
+    "https://news.sophos.com/en-us/category/threat-research/feed/",
+    "https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/feed/",
+    "https://research.checkpoint.com/feed/",
+    "https://unit42.paloaltonetworks.com/feed/",
+    "https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v",
+    "https://blog.talosintelligence.com/rss/",
+    "https://isc.sans.edu/rssfeed_full.xml",
+    "https://www.sentinelone.com/feed/",
 ]
 
 class FeedEntry:
@@ -87,7 +92,7 @@ def parse_feed(url: str) -> List[Dict[str, str]]:
                 
             entries = []
             
-            for entry in feed.entries:
+            for entry in feed.entries[:25]:
                 published = entry.get('published', entry.get('updated', str(datetime.now())))
                 try:
                     parsed_date = parser.parse(published).isoformat()
@@ -134,11 +139,12 @@ def save_feed_data(entries: List[Dict[str, str]], filename: str = "fetched_feeds
     except Exception as e:
         return f"Failed to save entries: {str(e)}"
 
-def fetch_feeds(urls: Optional[List[str]] = None) -> Dict[str, any]:
+def fetch_feeds(urls: Optional[List[str]] = None, max_total_entries: int = 25) -> Dict[str, any]:
     """Fetch and parse RSS feeds from the given URLs.
     
     Args:
         urls: Optional list of feed URLs to fetch. If None, uses DEFAULT_FEEDS.
+        max_total_entries: Maximum total number of entries to return (default: 25)
         
     Returns:
         Dictionary containing fetched entries and status information
@@ -175,18 +181,32 @@ def fetch_feeds(urls: Optional[List[str]] = None) -> Dict[str, any]:
             "entries": []
         }
 
+    # Sort entries by published date and limit to max_total_entries
+    sorted_entries = sorted(
+        all_entries,
+        key=lambda x: parser.parse(x['published']),
+        reverse=True
+    )[:max_total_entries]
+
     # Save raw entries
-    save_feed_data(all_entries)
+    save_feed_data(sorted_entries)
 
     return {
         "status": "success",
-        "message": f"Successfully fetched {len(all_entries)} entries from {len(feed_urls) - len(failed_feeds)} feeds",
+        "message": f"Successfully fetched {len(sorted_entries)} entries from {len(feed_urls) - len(failed_feeds)} feeds",
         "failed_feeds": failed_feeds,
-        "entries": all_entries
+        "entries": sorted_entries
     }
 
-def get_latest_entries(count: int = 20) -> Dict[str, any]:
-    """Get the latest entries from saved data."""
+def get_latest_entries(count: int = 25) -> Dict[str, any]:
+    """Get the latest entries from saved data.
+
+    Args:Add commentMore actions
+        count: Number of latest entries to return (default: 25)
+        
+    Returns:
+        A dictionary containing the latest entries
+    """
     try:
         with open("data/fetched_feeds.json", 'r') as f:
             entries = json.load(f)
