@@ -13,4 +13,6 @@ feed_cleaner_agent = (
     "- Maintain a balance between strict filtering and not discarding important early-stage threat intel.\n\n"
 
     "If you're unsure about an entry's relevance, err on the side of discarding it. Your goal is to reduce false positives for downstream agents."
+    "Save cleaned entries to BigQuery and display all newly saved entries to the user in proper format (not pure json) after succesful storage to BigQuery.\n\n"
+    "Never stop and wait for user input until you done your job and saved the cleaned entries to BigQuery and appear to user in proper format (not pure json). "
 ) 

@@ -147,46 +147,55 @@ def deduplicate_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
     }
 
 def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
-    """Save cleaned and deduplicated entries to BigQuery.
-    
-    Args:
-        entries: List of cleaned feed entries to save
-        
-    Returns:
-        Dictionary containing operation status and stats
-    """
+    """Save cleaned and deduplicated entries to BigQuery by checking existing 'link' values first."""
     try:
-        # Get project ID from environment variable
+        # Load project ID from environment variable
         project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
         if not project_id:
             raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
-            
+
         # Initialize BigQuery client
         client = bigquery.Client()
-        
-        # Define the table reference
-        table_id = f"{project_id}.agent_threat.agent_threat_data"
-        
-        # Format entries to match BigQuery schema and ensure uniqueness
-        formatted_entries = []
+
+        # Define full table path
+        table_id = f"{project_id}.agent_threat.feed_data"
+
+        # Get existing links from BigQuery
+        logger.info("Fetching existing links from BigQuery to prevent duplicates...")
+        query = f"SELECT link FROM `{table_id}`"
+        existing_links = {row.link for row in client.query(query).result()}
+        logger.info(f"Found {len(existing_links)} existing links in the table.")
+
+        # Filter out entries with duplicate links
+        filtered_entries = []
         current_time = datetime.utcnow()
-        
+
         for i, entry in enumerate(entries):
-            # Add milliseconds to timestamp to ensure uniqueness
-            entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
-            
-            formatted_entry = {
-                "title": entry.get("title", ""),
-                "link": entry.get("link", ""),
-                "published": entry.get("published", entry_timestamp),
-                "description": entry.get("description", ""),
-                "source_feed": entry.get("source", "")  # assuming 'source' is the feed URL
+            link = entry.get("link", "")
+            if link and link not in existing_links:
+                entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
+                formatted_entry = {
+                    "title": entry.get("title", ""),
+                    "link": link,
+                    "published": entry.get("published", entry_timestamp)
+                }
+                filtered_entries.append(formatted_entry)
+
+        if not filtered_entries:
+            logger.info("No new entries to insert after duplicate filtering.")
+            return {
+                "status": "success",
+                "message": "No new entries to insert (all were duplicates).",
+                "stats": {
+                    "saved_entries": 0,
+                    "skipped_duplicates": len(entries)
+                }
             }
-            formatted_entries.append(formatted_entry)
-        
-        # Load the entries into BigQuery
-        errors = client.insert_rows_json(table_id, formatted_entries)
-        
+
+        # Insert filtered entries into BigQuery
+        logger.info(f"Inserting {len(filtered_entries)} new entries into BigQuery...")
+        errors = client.insert_rows_json(table_id, filtered_entries)
+
         if errors:
             logger.error(f"Encountered errors while inserting rows: {errors}")
             return {
@@ -196,14 +205,16 @@ def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
                     "saved_entries": 0
                 }
             }
-            
+
         return {
             "status": "success",
-            "message": f"Successfully saved {len(entries)} cleaned entries to BigQuery",
+            "message": f"Successfully saved {len(filtered_entries)} new entries to BigQuery",
             "stats": {
-                "saved_entries": len(entries)
+                "saved_entries": len(filtered_entries),
+                "skipped_duplicates": len(entries) - len(filtered_entries)
             }
         }
+
     except Exception as e:
         logger.error(f"Error saving cleaned entries to BigQuery: {str(e)}")
         return {
@@ -213,6 +224,7 @@ def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
                 "saved_entries": 0
             }
         }
+
 
 def save_to_bigquery(entries: List[Dict[str, str]],
                      dataset_id: str,
