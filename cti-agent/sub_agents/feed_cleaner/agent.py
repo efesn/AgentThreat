@@ -76,8 +76,8 @@ def extract_text(entry: Dict[str, str]) -> str:
     """Extract combined text from title, summary, and description fields."""
     return " ".join([
         entry.get("title", ""),
-        entry.get("summary", ""),
-        entry.get("description", "")
+      #  entry.get("summary", ""),
+       # entry.get("description", "")
     ])
 
 def filter_by_keywords(entries: List[Dict[str, str]]) -> Dict[str, any]:
@@ -147,55 +147,39 @@ def deduplicate_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
     }
 
 def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
-    """Save cleaned and deduplicated entries to BigQuery by checking existing 'link' values first."""
+    """Save cleaned and deduplicated entries to BigQuery and trigger analysis."""
     try:
-        # Load project ID from environment variable
+        # Get project ID from environment variable
         project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        table_name = os.getenv('BIGQUERY_TABLE')
         if not project_id:
             raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
-
+            
         # Initialize BigQuery client
         client = bigquery.Client()
-
-        # Define full table path
-        table_id = f"{project_id}.agent_threat.feed_data"
-
-        # Get existing links from BigQuery
-        logger.info("Fetching existing links from BigQuery to prevent duplicates...")
-        query = f"SELECT link FROM `{table_id}`"
-        existing_links = {row.link for row in client.query(query).result()}
-        logger.info(f"Found {len(existing_links)} existing links in the table.")
-
-        # Filter out entries with duplicate links
-        filtered_entries = []
+        
+        # Define the table reference
+        table_id = f"{project_id}.{table_name}"
+        
+        # Format entries to match BigQuery schema
+        formatted_entries = []
         current_time = datetime.utcnow()
 
         for i, entry in enumerate(entries):
-            link = entry.get("link", "")
-            if link and link not in existing_links:
-                entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
-                formatted_entry = {
-                    "title": entry.get("title", ""),
-                    "link": link,
-                    "published": entry.get("published", entry_timestamp)
-                }
-                filtered_entries.append(formatted_entry)
-
-        if not filtered_entries:
-            logger.info("No new entries to insert after duplicate filtering.")
-            return {
-                "status": "success",
-                "message": "No new entries to insert (all were duplicates).",
-                "stats": {
-                    "saved_entries": 0,
-                    "skipped_duplicates": len(entries)
-                }
+            entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
+            formatted_entry = {
+                "title": entry.get("title", ""),
+                "link": entry.get("link", ""),
+                "published": entry.get("published", entry_timestamp),
+               # "description": entry.get("description", ""),
+               # "source_feed": entry.get("source", ""),
+                "analyzed": False  # Add this field to indicate unanalyzed entries
             }
+            formatted_entries.append(formatted_entry)
 
-        # Insert filtered entries into BigQuery
-        logger.info(f"Inserting {len(filtered_entries)} new entries into BigQuery...")
-        errors = client.insert_rows_json(table_id, filtered_entries)
-
+        # Insert entries into BigQuery
+        errors = client.insert_rows_json(table_id, formatted_entries)
+        
         if errors:
             logger.error(f"Encountered errors while inserting rows: {errors}")
             return {
@@ -206,20 +190,28 @@ def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
                 }
             }
 
+        # Trigger threat analysis
+        from ..threat_analyzer.agent import run_analysis
+        analysis_result = run_analysis()
+        
+        if analysis_result["status"] == "error":
+            logger.error(f"Threat analysis failed: {analysis_result['message']}")
+        
         return {
             "status": "success",
-            "message": f"Successfully saved {len(filtered_entries)} new entries to BigQuery",
+            "message": f"Successfully saved {len(entries)} entries to BigQuery and triggered analysis",
             "stats": {
-                "saved_entries": len(filtered_entries),
-                "skipped_duplicates": len(entries) - len(filtered_entries)
+                "saved_entries": len(entries),
+                "analysis_status": analysis_result["status"],
+                "analyzed_count": analysis_result.get("analyzed_count", 0)
             }
         }
 
     except Exception as e:
-        logger.error(f"Error saving cleaned entries to BigQuery: {str(e)}")
+        logger.error(f"Error in pass_clean_entries: {str(e)}")
         return {
             "status": "error",
-            "message": f"Failed to save cleaned entries: {str(e)}",
+            "message": f"Failed to process entries: {str(e)}",
             "stats": {
                 "saved_entries": 0
             }

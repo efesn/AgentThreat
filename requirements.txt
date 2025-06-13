@@ -1,4 +1,7 @@
 google-adk==1.1.1
 feedparser==6.0.10
 python-dateutil==2.8.2
-python-dotenv==1.0.0 
+python-dotenv==1.0.0
+#---
+beautifulsoup4>=4.9.3
+requests>=2.25.1
