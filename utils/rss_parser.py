@@ -10,18 +10,18 @@ from dateutil import parser
 
 class FeedEntry:
     """Represents a single RSS feed entry."""
-    def __init__(self, title: str, link: str, published: str, source: str):
+    def __init__(self, title: str, link: str, published: str):
         self.title = title
         self.link = link
         self.published = published
-        self.source = source
+        #self.source = source
 
     def to_dict(self) -> Dict:
         return {
             "title": self.title,
             "link": self.link,
             "published": self.published,
-            "source": self.source
+            #"source": self.source
         }
 
 class RSSParser:
@@ -47,7 +47,7 @@ class RSSParser:
                     title=entry.get('title', 'No title'),
                     link=entry.get('link', ''),
                     published=parsed_date,
-                    source=feed_url
+                    #source=feed_url
                 )
                 entries.append(feed_entry)
             

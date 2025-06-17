@@ -147,73 +147,108 @@ def deduplicate_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
     }
 
 def pass_clean_entries(entries: List[Dict[str, str]]) -> Dict[str, any]:
-    """Save cleaned and deduplicated entries to BigQuery and trigger analysis."""
+    """Save cleaned and deduplicated entries to BigQuery by checking existing 'link' values first, then trigger analysis."""
     try:
-        # Get project ID from environment variable
+        # Load environment variables
         project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
         table_name = os.getenv('BIGQUERY_TABLE')
-        if not project_id:
-            raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is not set")
-            
+        
+        if not project_id or not table_name:
+            raise ValueError("Missing required environment variables")
+
         # Initialize BigQuery client
         client = bigquery.Client()
-        
-        # Define the table reference
         table_id = f"{project_id}.{table_name}"
-        
-        # Format entries to match BigQuery schema
-        formatted_entries = []
+
+        # Get existing links from BigQuery
+        logger.info("Fetching existing links from BigQuery to prevent duplicates...")
+        query = f"SELECT link FROM `{table_id}`"
+        query_job = client.query(query)
+        existing_links = {row.link for row in query_job}
+
+        # Filter out entries with existing links and format new entries
+        new_entries = []
+        skipped_count = 0
         current_time = datetime.utcnow()
-
         for i, entry in enumerate(entries):
-            entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
-            formatted_entry = {
-                "title": entry.get("title", ""),
-                "link": entry.get("link", ""),
-                "published": entry.get("published", entry_timestamp),
-               # "description": entry.get("description", ""),
-               # "source_feed": entry.get("source", ""),
-                "analyzed": False  # Add this field to indicate unanalyzed entries
-            }
-            formatted_entries.append(formatted_entry)
+            link = entry.get('link', '')
+            if link and link not in existing_links:
+                entry_timestamp = (current_time + timedelta(milliseconds=i)).isoformat()
+                formatted_entry = {
+                    "title": entry.get("title", ""),
+                    "link": link,
+                    "published": entry.get("published", entry_timestamp),
+                    # "description": entry.get("description", ""),
+                    # "source_feed": entry.get("source", ""),
+                    "analyzed": False
+                }
+                new_entries.append(formatted_entry)
+            else:
+                skipped_count += 1
+                logger.debug(f"Skipping duplicate entry: {entry.get('title')} - {link}")
 
-        # Insert entries into BigQuery
-        errors = client.insert_rows_json(table_id, formatted_entries)
-        
+        if not new_entries:
+            logger.info("No new entries to save (all were duplicates)")
+            return {
+                "status": "success",
+                "message": "No new entries to save (all were duplicates)",
+                "stats": {
+                    "total_entries": len(entries),
+                    "saved_entries": 0,
+                    "skipped_entries": skipped_count,
+                    "analysis_status": None,
+                    "analyzed_count": 0
+                }
+            }
+
+        # Save only new entries to BigQuery
+        errors = client.insert_rows_json(table_id, new_entries)
         if errors:
             logger.error(f"Encountered errors while inserting rows: {errors}")
             return {
                 "status": "error",
                 "message": f"Failed to insert rows: {errors}",
                 "stats": {
-                    "saved_entries": 0
+                    "total_entries": len(entries),
+                    "saved_entries": 0,
+                    "skipped_entries": skipped_count,
+                    "analysis_status": None,
+                    "analyzed_count": 0
                 }
             }
 
         # Trigger threat analysis
         from ..threat_analyzer.agent import run_analysis
         analysis_result = run_analysis()
-        
-        if analysis_result["status"] == "error":
-            logger.error(f"Threat analysis failed: {analysis_result['message']}")
-        
+        analysis_status = analysis_result.get("status", None)
+        analyzed_count = analysis_result.get("analyzed_count", 0)
+        if analysis_status == "error":
+            logger.error(f"Threat analysis failed: {analysis_result.get('message', '')}")
+
+        logger.info(f"Successfully saved {len(new_entries)} entries, skipped {skipped_count} duplicates")
         return {
             "status": "success",
-            "message": f"Successfully saved {len(entries)} entries to BigQuery and triggered analysis",
+            "message": f"Successfully saved {len(new_entries)} entries and triggered analysis",
             "stats": {
-                "saved_entries": len(entries),
-                "analysis_status": analysis_result["status"],
-                "analyzed_count": analysis_result.get("analyzed_count", 0)
+                "total_entries": len(entries),
+                "saved_entries": len(new_entries),
+                "skipped_entries": skipped_count,
+                "analysis_status": analysis_status,
+                "analyzed_count": analyzed_count
             }
         }
 
     except Exception as e:
-        logger.error(f"Error in pass_clean_entries: {str(e)}")
+        logger.error(f"Error saving cleaned entries to BigQuery: {str(e)}")
         return {
             "status": "error",
-            "message": f"Failed to process entries: {str(e)}",
+            "message": str(e),
             "stats": {
-                "saved_entries": 0
+                "total_entries": len(entries),
+                "saved_entries": 0,
+                "skipped_entries": 0,
+                "analysis_status": None,
+                "analyzed_count": 0
             }
         }
 

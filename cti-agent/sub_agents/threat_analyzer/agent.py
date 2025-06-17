@@ -39,7 +39,7 @@ def fetch_unanalyzed_entries() -> List[Dict[str, Any]]:
         SELECT title, link, published
         FROM `{table_id}`
         WHERE analyzed IS NULL OR analyzed = FALSE
-        LIMIT 10
+        LIMIT 30
         """
 
         query_job = client.query(query)
