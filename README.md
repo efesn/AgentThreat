@@ -5,7 +5,7 @@
 
 AgentThreat is an autonomous, AI-driven multi-agent system built with Google’s Agent Development Kit (ADK) to collect, clean, enrich, and analyze cyber threat intelligence (CTI) reports from various trusted sources in real time. Designed to handle noisy and unstructured threat feeds from trusted sources.
 
-The project addresses the common challenge faced by threat hunters: extracting meaningful data from the high volume of noisy, duplicate, and unstructured CTI (Cyber Threat Intelligence) feeds. Using modular, language model-powered agents built with ADK, AgentThreat automatically filters, enriches, and classifies CTI entries.
+The project addresses the common challenge faced by security researchers: extracting meaningful data from the high volume of noisy, duplicate, and unstructured resources. Using LLM powered agents built with ADK, AgentThreat automatically filters, enriches, and classifies CTI entries.
 
 By enabling AI-native workflows with the Agent Development Kit, AgentThreat automatically filters out irrelevant or duplicate content, extracts key indicators of compromise (IOCs), identifies threat actors and malware, maps attacks to MITRE ATT&CK techniques, and summarizes threat context, all without human intervention. AgentThreat empowers threat hunters & security researchers by significantly reducing manual workload.
 
@@ -49,16 +49,27 @@ cd AgentThreat
 ```
 2. Set up environment variables:
 ```bash
-# Rename .env.example to .env and edit .env with proper settings:
+# Rename .env.example to .env. Then edit .env with proper settings
 cp .env.example .env
 ```
-```bash
-export GOOGLE_CLOUD_PROJECT="your-project-id"
-export GOOGLE_CLOUD_LOCATION="your-location"
-export BIGQUERY_TABLE="agent_threat.feed_data"
-```
 
-3. Install dependencies:
+3. (Recommended) Create a Virtual Environment
+
+Prefer that to isolate project dependencies and avoid conflicts instead of using break system packages flag, create a virtual environment:
+
+```bash
+python -m venv agentthreat
+```
+#### Active the virtual environment:
+Windows:
+```bash
+venv\Scripts\activate
+```
+macOS/Linux:
+```
+source venv/bin/activate
+```
+#### Install Python Dependencies:
 ```bash
 pip install -r requirements.txt
 ```
