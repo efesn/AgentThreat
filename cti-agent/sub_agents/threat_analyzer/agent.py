@@ -78,15 +78,28 @@ def identify_threat_category(text: str) -> str:
             
     return 'unknown'
 
-def generate_summary(text: str, max_length: int = 500) -> str:
-    """Generate a concise summary of the threat intelligence."""
+# Create the summarizer agent
+summarizer_agent = LlmAgent(
+    name="summarizer",
+    model="gemini-2.0-flash-001",
+    description="Agent for summarizing cybersecurity articles",
+    instruction=prompt.summarizer_agent_prompt,
+)
+
+def generate_summary(text: str) -> str:
+    """Generate a concise summary of the threat intelligence using an AI agent."""
     try:
-        # Extract first few sentences or paragraphs, will improve this later
-        sentences = text.split('.')[:3]
-        summary = '. '.join(sentences)
-        return summary[:max_length].strip()
-    except Exception as e:
-        logger.error(f"Error generating summary: {str(e)}")
+        if not text:
+            return ""
+
+        max_chars = 5000
+        text_to_summarize = text[:max_chars]
+        logger.debug(f"Summarizing text (first 500 chars): {text_to_summarize[:500]}")
+
+        summary = summarizer_agent.run(input=text_to_summarize)
+        return summary.strip()
+    except Exception:
+        logger.exception("Error generating summary")
         return ""
 
 def extract_threat_actor(text: str) -> str:
@@ -180,62 +193,98 @@ def analyze_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
         return None
 
 def run_analysis(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Analyze unanalyzed entries and save results to BigQuery."""
+    """
+    Analyzes entries, checks for duplicates in BigQuery based on 'link', 
+    and saves only new, analyzed results.
+    """
+    if not entries:
+        return {
+            "status": "success",
+            "message": "No entries to analyze.",
+            "analyzed_count": 0,
+            "saved_count": 0,
+            "skipped_count": 0
+        }
+
+    logger.info(f"Starting analysis for {len(entries)} entries.")
+    
+    # 1. Analyze all incoming entries
+    analysis_results = []
+    for entry in entries:
+        try:
+            # Assuming analyze_entry returns the full, enriched entry object
+            analyzed_entry = analyze_entry(entry)
+            if analyzed_entry:
+                analysis_results.append(analyzed_entry)
+        except Exception as e:
+            logger.error(f"Error analyzing entry {entry.get('link')}: {str(e)}")
+            continue # Skip to the next entry
+
+    if not analysis_results:
+        logger.info("Analysis resulted in no valid entries to save.")
+        return {
+            "status": "success",
+            "message": "Analysis completed, but no new data was generated to save.",
+            "analyzed_count": 0,
+            "saved_count": 0,
+            "skipped_count": 0
+        }
+
+    # 2. Save new, analyzed results to BigQuery, checking for duplicates
     try:
-        if not entries:
-            return {
-                "status": "success",
-                "message": "No new entries to analyze",
-                "analyzed_count": 0
-            }
+        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        table_name = os.getenv('BIGQUERY_TABLE')
+        if not project_id or not table_name:
+            raise ValueError("Google Cloud project ID and BigQuery table name must be set.")
+            
+        client = bigquery.Client()
+        table_id = f"{project_id}.{table_name}"
+
+        # Fetch existing links to avoid duplicates
+        logger.info("Fetching existing links from BigQuery to prevent duplicates...")
+        query = f"SELECT link FROM `{table_id}`"
+        query_job = client.query(query)
+        existing_links = {row.link for row in query_job}
+        logger.info(f"Found {len(existing_links)} existing links in BigQuery.")
+
+        # Filter out results that already exist in BigQuery
+        new_results_to_insert = []
+        skipped_count = 0
+        for result in analysis_results:
+            if result.get('link') not in existing_links:
+                new_results_to_insert.append(result)
+            else:
+                skipped_count += 1
         
-        results = []
-        
-        for entry in entries:
-            try:
-                analysis_result = analyze_entry(entry)
-                if analysis_result:
-                    results.append(analysis_result)
-            except Exception as e:
-                logger.error(f"Error analyzing entry {entry.get('link')}: {str(e)}")
-                continue
+        logger.info(f"Analyzed {len(analysis_results)} entries. Found {len(new_results_to_insert)} new entries to save. Skipped {skipped_count} duplicates.")
 
-        # Save analyzed results to BigQuery
-        if results:
-            try:
-                project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-                table_name = os.getenv('BIGQUERY_TABLE')
-                client = bigquery.Client()
-                table_id = f"{project_id}.{table_name}"
-
-                # Insert analyzed results
-                errors = client.insert_rows_json(table_id, results)
-                if errors:
-                    raise Exception(f"Error inserting analyzed results: {errors}")
-
-                logger.info(f"Successfully processed {len(results)} entries")
-
-            except Exception as e:
-                logger.error(f"Error saving analysis results: {str(e)}")
-                return {
-                    "status": "error",
-                    "message": f"Error saving results: {str(e)}",
-                    "analyzed_count": 0
-                }
+        # Insert only the new results
+        if new_results_to_insert:
+            logger.info(f"Inserting {len(new_results_to_insert)} new analyzed entries into BigQuery...")
+            errors = client.insert_rows_json(table_id, new_results_to_insert)
+            if errors:
+                # This error is critical, something is wrong with the data or table schema
+                error_message = f"Encountered errors while inserting rows: {errors}"
+                logger.error(error_message)
+                raise Exception(error_message)
+            logger.info("Successfully inserted new entries.")
 
         return {
             "status": "success",
-            "message": f"Successfully analyzed {len(results)} entries",
-            "analyzed_count": len(results),
-            "results": results
+            "message": f"Analysis complete. Saved {len(new_results_to_insert)} new entries. Skipped {skipped_count} duplicates.",
+            "analyzed_count": len(analysis_results),
+            "saved_count": len(new_results_to_insert),
+            "skipped_count": skipped_count
         }
 
     except Exception as e:
-        logger.error(f"Error in threat analysis: {str(e)}")
+        logger.error(f"An error occurred during BigQuery operation: {str(e)}")
         return {
             "status": "error",
             "message": str(e),
-            "analyzed_count": 0
+            "analyzed_count": len(analysis_results),
+            "saved_count": 0,
+            "skipped_count": 0
         }
 
 # Create the threat analyzer agent

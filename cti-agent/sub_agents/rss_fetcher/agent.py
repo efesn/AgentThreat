@@ -13,25 +13,13 @@ import feedparser
 from dateutil import parser
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
+
+from config.feed_urls import FEED_URLS
 from . import prompt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Default RSS feed sources
-DEFAULT_FEEDS = [
-    "https://blog.google/threat-analysis-group/rss/",
-    "https://cloudblog.withgoogle.com/topics/threat-intelligence/rss/",
-    "https://news.sophos.com/en-us/category/threat-research/feed/",
-    "https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/feed/",
-    "https://research.checkpoint.com/feed/",
-    "https://unit42.paloaltonetworks.com/feed/",
-    "https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v",
-    "https://blog.talosintelligence.com/rss/",
-    "https://isc.sans.edu/rssfeed_full.xml",
-    "https://www.sentinelone.com/feed/",
-]
 
 class FeedEntry:
     """Represents a single RSS feed entry."""
@@ -156,7 +144,7 @@ def fetch_feeds(urls: Optional[List[str]] = None, max_total_entries: int = 25) -
             "entries": []
         }
 
-    feed_urls = urls or DEFAULT_FEEDS
+    feed_urls = urls or FEED_URLS
     all_entries = []
     failed_feeds = []
 

@@ -25,3 +25,11 @@ Output format should include:
 
 Be accurate and concise. Only extract information that is present or strongly implied in the content.
 """
+
+summarizer_agent_prompt = """
+You are a specialized AI assistant for summarizing cybersecurity articles.
+Your task is to generate a concise, neutral, and informative summary of the provided text.
+The summary should capture the key findings, including the main threat, affected systems, and any mentioned indicators of compromise (IOCs) or mitigation strategies.
+Do not add any information that is not present in the original text.
+The summary should be a single paragraph.
+"""
