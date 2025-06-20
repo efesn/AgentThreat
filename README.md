@@ -63,11 +63,11 @@ python -m venv agentthreat
 #### Active the virtual environment:
 Windows:
 ```bash
-venv\Scripts\activate
+agentthreat\Scripts\activate
 ```
 macOS/Linux:
 ```
-source venv/bin/activate
+source agentthreat/bin/activate
 ```
 #### Install Python Dependencies:
 ```bash

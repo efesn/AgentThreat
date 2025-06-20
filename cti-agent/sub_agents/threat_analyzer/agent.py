@@ -27,36 +27,6 @@ class IOCPatterns:
     CVE = r'CVE-\d{4}-\d{4,7}'
     EMAIL = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 
-def fetch_unanalyzed_entries() -> List[Dict[str, Any]]:
-    """Fetch unanalyzed entries from BigQuery."""
-    try:
-        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-        table_name = os.getenv('BIGQUERY_TABLE')
-        client = bigquery.Client()
-        table_id = f"{project_id}.{table_name}"
-
-        query = f"""
-        SELECT title, link, published
-        FROM `{table_id}`
-        WHERE analyzed IS NULL OR analyzed = FALSE
-        LIMIT 30
-        """
-
-        query_job = client.query(query)
-        entries = []
-        for row in query_job:
-            entries.append({
-                "title": row.title,
-                "link": row.link,
-                "published": row.published
-            })
-        
-        return entries
-    
-    except Exception as e:
-        logger.error(f"Error fetching entries from BigQuery: {str(e)}")
-        return []
-
 def fetch_article_content(url: str) -> str:
     """Fetch and extract text content from article URL."""
     try:
@@ -157,32 +127,41 @@ def analyze_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # Fetch and analyze content
         content = fetch_article_content(entry['link'])
+        if not content:
+            logger.error(f"Could not fetch content for {entry['link']}")
+            return None
+            
+        # Extract and validate data
         iocs = extract_iocs(content)
         threat_category = identify_threat_category(content)
-        
-        # Generate summary and extract threat actor
         summary = generate_summary(content)
         threat_actor = extract_threat_actor(content)
         mitre_techniques = identify_mitre_techniques(content)
         
-        # Update BigQuery with analysis results
-        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-        table_name = os.getenv('BIGQUERY_TABLE')
-        client = bigquery.Client()
-        table_id = f"{project_id}.{table_name}"
-        
-        # Convert lists to strings for BigQuery
-        iocs_str = json.dumps(iocs)
-        mitre_techniques_str = json.dumps(mitre_techniques)
-        
-        # Ensure published date is in ISO format string
-        published_date = entry['published']
+        # Ensure proper data types and handle nulls
+        published_date = entry.get('published')
         if isinstance(published_date, datetime):
             published_date = published_date.isoformat()
-        
-        # Create analysis row with all dates as ISO format strings
+        elif not published_date:
+            published_date = datetime.utcnow().isoformat()
+            
+        # Convert complex objects to strings for BigQuery
+        try:
+            iocs_str = json.dumps(iocs) if iocs else "{}"
+            mitre_techniques_str = json.dumps(mitre_techniques) if mitre_techniques else "[]"
+        except Exception as e:
+            logger.error(f"Error converting data to JSON: {str(e)}")
+            iocs_str = "{}"
+            mitre_techniques_str = "[]"
+
+        # Validate string lengths for BigQuery
+        summary = (summary or "")[:1000]  # Limit summary length
+        threat_actor = (threat_actor or "unknown")[:100]  # Limit actor name length
+        threat_category = (threat_category or "unknown")[:50]  # Limit category length
+
+        # Create analysis row with validated data
         analysis_row = {
-            "title": entry['title'],
+            "title": entry['title'][:500],  # Limit title length
             "link": entry['link'],
             "published": published_date,
             "analyzed": True,
@@ -193,44 +172,16 @@ def analyze_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
             "threat_actor": threat_actor,
             "mitre_techniques": mitre_techniques_str
         }
-        
-        # Insert the analysis results
-        errors = client.insert_rows_json(table_id, [analysis_row])
-        
-        if errors:
-            logger.error(f"Error inserting analysis results: {errors}")
-            return None
-        
-        analysis_result = {
-            "title": entry['title'],
-            "link": entry['link'],
-            "published": published_date,
-            "threat_category": threat_category,
-            "iocs": iocs,
-            "summary": summary,
-            "threat_actor": threat_actor,
-            "mitre_techniques": mitre_techniques,
-            "analysis_timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # Enhanced logging
-        logger.info(f"\n=== Analysis Results for {entry['title']} ===")
-        logger.info(f"Category: {threat_category}")
-        logger.info(f"Threat Actor: {threat_actor}")
-        logger.info(f"MITRE Techniques: {mitre_techniques}")
-        logger.info(f"IOCs found: {len(sum(iocs.values(), []))} indicators")
-        logger.info("------------------------")
-        
-        return analysis_result
-        
+
+        return analysis_row
+
     except Exception as e:
-        logger.error(f"Error analyzing entry {entry['link']}: {str(e)}")
+        logger.error(f"Error analyzing entry: {str(e)}")
         return None
 
-def run_analysis() -> Dict[str, Any]:
-    """Main function to run threat analysis on unanalyzed entries."""
+def run_analysis(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Analyze unanalyzed entries and save results to BigQuery."""
     try:
-        entries = fetch_unanalyzed_entries()
         if not entries:
             return {
                 "status": "success",
@@ -239,18 +190,46 @@ def run_analysis() -> Dict[str, Any]:
             }
         
         results = []
-        for entry in entries:
-            result = analyze_entry(entry)
-            if result:
-                results.append(result)
         
+        for entry in entries:
+            try:
+                analysis_result = analyze_entry(entry)
+                if analysis_result:
+                    results.append(analysis_result)
+            except Exception as e:
+                logger.error(f"Error analyzing entry {entry.get('link')}: {str(e)}")
+                continue
+
+        # Save analyzed results to BigQuery
+        if results:
+            try:
+                project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+                table_name = os.getenv('BIGQUERY_TABLE')
+                client = bigquery.Client()
+                table_id = f"{project_id}.{table_name}"
+
+                # Insert analyzed results
+                errors = client.insert_rows_json(table_id, results)
+                if errors:
+                    raise Exception(f"Error inserting analyzed results: {errors}")
+
+                logger.info(f"Successfully processed {len(results)} entries")
+
+            except Exception as e:
+                logger.error(f"Error saving analysis results: {str(e)}")
+                return {
+                    "status": "error",
+                    "message": f"Error saving results: {str(e)}",
+                    "analyzed_count": 0
+                }
+
         return {
             "status": "success",
             "message": f"Successfully analyzed {len(results)} entries",
             "analyzed_count": len(results),
             "results": results
         }
-        
+
     except Exception as e:
         logger.error(f"Error in threat analysis: {str(e)}")
         return {
@@ -267,7 +246,5 @@ threat_analyzer_agent = LlmAgent(
     instruction=prompt.threat_analyzer_agent,
     tools=[
         FunctionTool(func=run_analysis),
-        FunctionTool(func=analyze_entry),
-        FunctionTool(func=fetch_unanalyzed_entries)
     ]
 )

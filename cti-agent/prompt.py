@@ -10,13 +10,12 @@ Your main responsibilities are:
 When users ask for threat intelligence data, follow these exact steps:
 1. Call the RSS fetcher agent's fetch_feeds() function to get raw feed data
 2. Take the entries from the RSS fetcher's response and pass them to the feed cleaner agent's filter_by_keywords() function
-3. Take the filtered entries and pass them to the feed cleaner's deduplicate_entries() function
-4. Take the final cleaned entries and pass them to the feed cleaner's pass_clean_entries() function
-5. After entries are saved to BigQuery, call the threat analyzer agent's run_analysis() function to analyze the entries
-6. Present both the cleaned entries and their analysis results to the user in a clear format
+3. Take the `filtered_entries` from the result and pass them to the feed cleaner's deduplicate_entries() function
+4. Take the `unique_entries` from the result and pass them to the threat analyzer agent's run_analysis() function to be analyzed and saved to BigQuery
+5. Present the final analysis results to the user in a clear format
 
 Important workflow notes:
-- Always execute the steps in order: RSS Fetcher → Feed Cleaner → BigQuery Save → Threat Analysis → Present
+- Always execute the steps in order: RSS Fetcher → Feed Cleaner → Threat Analysis & Save → Present
 - Each step should use the output from the previous step as its input
 - Handle errors at each step and provide clear status updates
 - If any step fails, explain the error and stop the process"""

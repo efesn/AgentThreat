@@ -11,7 +11,7 @@ MODEL = "gemini-2.0-flash-001"
 
 # Create the coordinator agent that will manage other agents
 root_agent = LlmAgent(
-    name="cti_coordinator",
+    name="AgentThreat",
     model=MODEL,
     description="Coordinator agent that manages CTI sub-agents",
     instruction=prompt.COORDINATOR_PROMPT,
