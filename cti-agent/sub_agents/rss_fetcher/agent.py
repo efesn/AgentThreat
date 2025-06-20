@@ -1,5 +1,5 @@
 """RSS Feed Fetcher Agent implementation."""
-
+import os
 import json
 import logging
 import socket
@@ -235,4 +235,4 @@ rss_fetcher_agent = LlmAgent(
         FunctionTool(func=save_feed_data),
         FunctionTool(func=get_latest_entries)
     ]
-) 
+)

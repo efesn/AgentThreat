@@ -1,5 +1,5 @@
 """Threat Analyzer Agent implementation for analyzing CTI feed entries from BigQuery."""
-
+from . import prompt
 import logging
 import os
 import re
@@ -10,8 +10,15 @@ from bs4 import BeautifulSoup
 from google.cloud import bigquery
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
+import google.generativeai as genai
 from . import prompt
 import json
+
+# Configure Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))  # Set your Gemini API key in env vars
+
+# Load model
+gemini_model = genai.GenerativeModel("gemini-2.0-flash")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,9 +34,10 @@ class IOCPatterns:
     CVE = r'CVE-\d{4}-\d{4,7}'
     EMAIL = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
 
-def fetch_article_content(url: str) -> str:
-    """Fetch and extract text content from article URL."""
+def fetch_article_content(url: str) -> tuple[str, str]:
+    """Fetch article content and generate its summary."""
     try:
+        logger.info(f"Fetching content from: {url}")
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -40,11 +48,18 @@ def fetch_article_content(url: str) -> str:
         for element in soup(['script', 'style']):
             element.decompose()
             
-        return soup.get_text()
+        content = soup.get_text()
+        
+        # Generate summary immediately after fetching content
+        logger.info("Generating summary...")
+        summary = generate_summary(content)
+        logger.info(f"Summary generated ({len(summary)} chars)")
+        
+        return content, summary
         
     except Exception as e:
-        logger.error(f"Error fetching content from {url}: {str(e)}")
-        return ""
+        logger.error(f"Error fetching/summarizing content from {url}: {str(e)}")
+        return "", ""
 
 def extract_iocs(text: str) -> Dict[str, List[str]]:
     """Extract IOCs from text content."""
@@ -78,29 +93,30 @@ def identify_threat_category(text: str) -> str:
             
     return 'unknown'
 
-# Create the summarizer agent
-summarizer_agent = LlmAgent(
-    name="summarizer",
-    model="gemini-2.0-flash-001",
-    description="Agent for summarizing cybersecurity articles",
-    instruction=prompt.summarizer_agent_prompt,
-)
-
 def generate_summary(text: str) -> str:
-    """Generate a concise summary of the threat intelligence using an AI agent."""
+    """Generate summary using Gemini via google-generativeai SDK."""
     try:
         if not text:
             return ""
 
         max_chars = 5000
         text_to_summarize = text[:max_chars]
-        logger.debug(f"Summarizing text (first 500 chars): {text_to_summarize[:500]}")
 
-        summary = summarizer_agent.run(input=text_to_summarize)
-        return summary.strip()
-    except Exception:
-        logger.exception("Error generating summary")
+        # get summarizer prompt from the dedicated prompt file 
+        summarization_prompt = f"""
+        {prompt.summarizer_agent_prompt}
+
+        Article to summarize:
+        {text_to_summarize}
+        """
+
+        response = gemini_model.generate_content(summarization_prompt)
+        return response.text.strip()[:1000]
+
+    except Exception as e:
+        logger.error("Gemini summary generation failed", exc_info=True)
         return ""
+
 
 def extract_threat_actor(text: str) -> str:
     """Extract threat actor names from content."""
@@ -138,16 +154,15 @@ def identify_mitre_techniques(text: str) -> List[str]:
 def analyze_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Analyze a single feed entry."""
     try:
-        # Fetch and analyze content
-        content = fetch_article_content(entry['link'])
+        # Fetch content and get summary in one call
+        content, summary = fetch_article_content(entry['link'])
         if not content:
             logger.error(f"Could not fetch content for {entry['link']}")
             return None
             
-        # Extract and validate data
+        # Extract and validate other data
         iocs = extract_iocs(content)
         threat_category = identify_threat_category(content)
-        summary = generate_summary(content)
         threat_actor = extract_threat_actor(content)
         mitre_techniques = identify_mitre_techniques(content)
         

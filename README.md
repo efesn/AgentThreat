@@ -30,7 +30,11 @@ The system employs three specialized agents:
 - Generates human readable summaries
 - Inserts analyzed data to BigQuery
 
-## Technical Stack
+## Tech Stack
+- **Language**: Python
+- **Framework**: Google Agent Development Kit (ADK)
+- **Cloud Services**: Google Cloud BigQuery for data storage
+- **LLM**: Gemini 2.0 Flash
 
 ## Requirements
 
@@ -114,7 +118,7 @@ Interact with agents in a browser-based playground.
 adk web .
 ```
 
-## 📊 Data Sources
+## Data Sources
 
 - [Google Threat Intelligence](https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v)
 - [Sophos Threat Research](https://news.sophos.com/en-us/category/threat-research/feed/)
@@ -125,7 +129,7 @@ adk web .
 - [SANS Internet Storm Center](https://isc.sans.edu/rssfeed_full.xml)
 - [SentinelOne Research](https://www.sentinelone.com/feed/)
 
-## 🔜 Future Enhancements
+## Future Enhancements
 
 - Running autonomous daily/weekly and provide weekly/monthly insights by analyzing them
 -
