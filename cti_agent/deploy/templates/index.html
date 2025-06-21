@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentThreat Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>AgentThreat Intelligence Dashboard</h1>
+    </header>
+    
+    <div class="container">
+        <div class="control-panel">
+            <h2>Agent Controls</h2>
+            <div class="button-group">
+                <button id="runAgentBtn" class="primary-btn">▶️ Run Threat Analysis Workflow</button>
+                <button id="clearLogsBtn" class="secondary-btn">Clear Logs</button>
+            </div>
+            
+            <div class="log-panel">
+                <h3>Agent Logs</h3>
+                <div id="logBox">Waiting for agent activity...</div>
+            </div>
+        </div>
+        
+        <div class="data-panel">
+            <h2>Recent Threat Intelligence</h2>
+            <div class="table-container">
+                <table id="threatTable">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Published</th>
+                            <th>Category</th>
+                            <th>Actor</th>
+                            <th>IOCs</th>
+                            <th>Summary</th>
+                            <th>MITRE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td colspan="7" class="loading-message">Click "Run Threat Analysis Workflow" to load threat data.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
