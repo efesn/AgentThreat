@@ -1,5 +1,4 @@
 # AgentThreat: Multi-Agent CTI System with Google's ADK
-[AgentThreat is currently in development]
 
 ## Overview
 
